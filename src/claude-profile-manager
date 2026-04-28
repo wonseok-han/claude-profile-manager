@@ -1,0 +1,488 @@
+#!/usr/bin/env bash
+# claude-profile-manager — Claude Code multi-account/session manager
+# Uses CLAUDE_CONFIG_DIR environment variable to support isolated accounts per session
+
+set -e
+
+PROFILE_HOME="$HOME"
+PROFILE_PREFIX=".claude-"
+CLAUDE_DEFAULT_DIR="$HOME/.claude"
+
+if [ -t 1 ]; then
+  COLOR_GREEN="\033[0;32m"
+  COLOR_YELLOW="\033[0;33m"
+  COLOR_RESET="\033[0m"
+else
+  COLOR_GREEN=""
+  COLOR_YELLOW=""
+  COLOR_RESET=""
+fi
+
+# ────────────────────────────────────────────
+# Utilities
+# ────────────────────────────────────────────
+
+_profile_dir() {
+  printf '%s/%s%s' "$PROFILE_HOME" "$PROFILE_PREFIX" "$1"
+}
+
+_validate_profile_name() {
+  local name="$1"
+  if [ -z "$name" ]; then
+    echo "Error: profile name is required." >&2
+    exit 1
+  fi
+  if [[ ! "$name" =~ ^[A-Za-z0-9_.-]{1,64}$ ]]; then
+    echo "Error: profile name must use alphanumeric characters and _ . - only, 1–64 characters." >&2
+    exit 1
+  fi
+  if [[ "$name" == -* ]]; then
+    echo "Error: profile name cannot start with '-'." >&2
+    exit 1
+  fi
+  case "$name" in
+    create|clone|rename|remove|status|list|doctor|setup|statusline|help)
+      echo "Error: '${name}' is a reserved word and cannot be used as a profile name." >&2
+      exit 1
+      ;;
+  esac
+}
+
+_list_profiles() {
+  for dir in "$PROFILE_HOME/$PROFILE_PREFIX"*/; do
+    [ -d "$dir" ] || continue
+    local name="${dir#$PROFILE_HOME/$PROFILE_PREFIX}"
+    name="${name%/}"
+    [ -n "$name" ] && printf '%s\n' "$name"
+  done
+}
+
+_truncate() {
+  local str="$1" max="$2"
+  if [ "${#str}" -gt "$max" ]; then
+    printf '%s…' "${str:0:$((max - 1))}"
+  else
+    printf '%s' "$str"
+  fi
+}
+
+_profile_email() {
+  local profile_dir="$1"
+  local claude_json="$profile_dir/.claude.json"
+  if [ ! -f "$claude_json" ]; then
+    printf '(login required)'
+    return
+  fi
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$claude_json'))
+    email = d.get('oauthAccount', {}).get('emailAddress', '')
+    print(email if email else '(login required)')
+except:
+    print('(unknown)')
+" 2>/dev/null || printf '(unknown)'
+}
+
+_setup_profile_dir() {
+  local profile_dir="$1"
+
+  mkdir -p "$profile_dir"
+  chmod 700 "$profile_dir"
+
+  if [ -d "$CLAUDE_DEFAULT_DIR" ]; then
+    local item bname
+    for item in "$CLAUDE_DEFAULT_DIR"/* "$CLAUDE_DEFAULT_DIR"/.[!.]*; do
+      [ -e "$item" ] || [ -L "$item" ] || continue
+      bname="${item##*/}"
+      [[ "$bname" == ".credentials.json" ]] && continue
+      [[ "$bname" == ".claude.json" ]] && continue
+      ln -sf "$item" "$profile_dir/$bname"
+    done
+  fi
+}
+
+# ────────────────────────────────────────────
+# Command implementations
+# ────────────────────────────────────────────
+
+cmd_create() {
+  local profile="$1"
+  _validate_profile_name "$profile"
+
+  local profile_dir; profile_dir="$(_profile_dir "$profile")"
+
+  if [ -d "$profile_dir" ]; then
+    echo "Error: profile '${profile}' already exists: $profile_dir" >&2
+    exit 1
+  fi
+
+  _setup_profile_dir "$profile_dir"
+
+  printf "Profile '%s' created\n" "$profile"
+  printf "  settings, memory, history: ~/.claude/ shared (symlink)\n"
+  printf "\nNew account login required. Launching Claude...\n\n"
+
+  CLAUDE_CONFIG_DIR="$profile_dir" claude
+
+  if [ ! -f "$profile_dir/.credentials.json" ]; then
+    if [[ "$(uname -s)" == "Darwin" ]] && command -v security >/dev/null 2>&1; then
+      local creds
+      creds=$(security find-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w 2>/dev/null) || true
+      if [ -n "$creds" ]; then
+        ( umask 077; printf '%s' "$creds" > "$profile_dir/.credentials.json" )
+      fi
+    elif [ -f "$CLAUDE_DEFAULT_DIR/.credentials.json" ]; then
+      cp "$CLAUDE_DEFAULT_DIR/.credentials.json" "$profile_dir/.credentials.json"
+      chmod 600 "$profile_dir/.credentials.json"
+    fi
+  fi
+
+  if [ -f "$profile_dir/.credentials.json" ]; then
+    printf "\nLogin complete. Use 'cpm %s' to run.\n" "$profile"
+  else
+    printf "\nLogin may not have completed. Run 'cpm %s' again to log in.\n" "$profile"
+  fi
+}
+
+cmd_clone() {
+  local profile="$1"
+  _validate_profile_name "$profile"
+
+  local profile_dir; profile_dir="$(_profile_dir "$profile")"
+
+  if [ -d "$profile_dir" ]; then
+    echo "Error: profile '${profile}' already exists: $profile_dir" >&2
+    exit 1
+  fi
+
+  _setup_profile_dir "$profile_dir"
+
+  if [ -f "$HOME/.claude.json" ]; then
+    cp "$HOME/.claude.json" "$profile_dir/.claude.json"
+    chmod 600 "$profile_dir/.claude.json"
+  fi
+
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v security >/dev/null 2>&1; then
+    local creds
+    creds=$(security find-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w 2>/dev/null) || true
+    if [ -n "$creds" ]; then
+      ( umask 077; printf '%s' "$creds" > "$profile_dir/.credentials.json" )
+      printf '  Keychain credentials copied\n'
+    fi
+  fi
+
+  if [[ "$(uname -s)" != "Darwin" ]] && [ -f "$CLAUDE_DEFAULT_DIR/.credentials.json" ]; then
+    cp "$CLAUDE_DEFAULT_DIR/.credentials.json" "$profile_dir/.credentials.json"
+    chmod 600 "$profile_dir/.credentials.json"
+    printf '  Credentials copied\n'
+  fi
+
+  printf "Profile '%s' created\n" "$profile"
+  printf "  account: %s\n" "$(_profile_email "$profile_dir")"
+  printf "  run:     cpm %s\n" "$profile"
+}
+
+cmd_list() {
+  local profiles; profiles=$(_list_profiles)
+  if [ -z "$profiles" ]; then
+    [ -t 1 ] && echo "  No saved profiles."
+    return
+  fi
+  if [ -t 1 ]; then
+    echo ""
+    while IFS= read -r profile; do
+      printf "  • %s\n" "$profile"
+    done <<< "$profiles"
+    echo ""
+  else
+    printf '%s\n' "$profiles"
+  fi
+}
+
+cmd_remove() {
+  local profile="$1"
+  _validate_profile_name "$profile"
+
+  local profile_dir; profile_dir="$(_profile_dir "$profile")"
+
+  if [ ! -d "$profile_dir" ]; then
+    echo "Error: profile '${profile}' does not exist." >&2
+    exit 1
+  fi
+
+  printf "Delete profile '%s'?\n" "$profile"
+  printf "  Path: %s\n" "$profile_dir"
+  printf "Deleting removes all credentials for this profile. Continue? (y/N): "
+  read -r confirm
+  confirm="${confirm%% *}"
+  case "$confirm" in
+    [yY]|[yY][eE][sS])
+      rm -rf "$profile_dir"
+      printf "Profile '%s' deleted\n" "$profile"
+      ;;
+    *)
+      echo "Cancelled."
+      ;;
+  esac
+}
+
+cmd_rename() {
+  local old_name="$1"
+  local new_name="$2"
+
+  _validate_profile_name "$old_name"
+  _validate_profile_name "$new_name"
+
+  local old_dir; old_dir="$(_profile_dir "$old_name")"
+  local new_dir; new_dir="$(_profile_dir "$new_name")"
+
+  if [ ! -d "$old_dir" ]; then
+    echo "Error: profile '${old_name}' does not exist." >&2
+    exit 1
+  fi
+
+  if [ -d "$new_dir" ]; then
+    echo "Error: profile '${new_name}' already exists." >&2
+    exit 1
+  fi
+
+  mv "$old_dir" "$new_dir"
+  printf "Profile renamed: '%s' → '%s'\n" "$old_name" "$new_name"
+}
+
+cmd_status() {
+  local profiles; profiles=$(_list_profiles)
+
+  echo ""
+  printf "  %-20s %s\n" "profile" "account"
+  echo "  ─────────────────────────────────────────────────"
+
+  if [ -z "$profiles" ]; then
+    echo "  No saved profiles."
+    echo ""
+    echo "  Add new account:  cpm create <name>"
+    echo "  Clone current:    cpm clone <name>"
+  else
+    while IFS= read -r profile; do
+      [ -z "$profile" ] && continue
+      local dir; dir="$(_profile_dir "$profile")"
+      local email; email="$(_profile_email "$dir")"
+      local name; name=$(_truncate "$profile" 20)
+      if [[ "$email" != "(login required)" ]]; then
+        printf "  ${COLOR_GREEN}✓${COLOR_RESET}  %-20s %s\n" "$name" "$email"
+      else
+        printf "  ${COLOR_YELLOW}✗${COLOR_RESET}  %-20s\n" "$name"
+      fi
+    done <<< "$profiles"
+  fi
+
+  echo ""
+}
+
+cmd_doctor() {
+  echo ""
+  echo "  claude-profile-manager — Environment Info"
+  echo "  ──────────────────────────────────────────"
+  printf "  Default Claude directory: %s\n" "$CLAUDE_DEFAULT_DIR"
+  printf "  Profile location pattern: %s/.claude-<name>/\n" "$HOME"
+  echo ""
+
+  echo "  claude command:"
+  if command -v claude >/dev/null 2>&1; then
+    printf "    Path: %s\n" "$(command -v claude)"
+  else
+    echo "    ✗ claude command not found."
+  fi
+  echo ""
+
+  echo "  profiles:"
+  printf "    %-3s %-18s %s\n" "" "name" "account"
+  echo "    ──────────────────────────────────────────"
+  local profiles; profiles=$(_list_profiles)
+  if [ -z "$profiles" ]; then
+    echo "    None — create with 'cpm create <name>'"
+  else
+    while IFS= read -r profile; do
+      local dir; dir="$(_profile_dir "$profile")"
+      local email; email="$(_profile_email "$dir")"
+      local name; name=$(_truncate "$profile" 20)
+      if [[ "$email" != "(login required)" ]]; then
+        printf "    ${COLOR_GREEN}✓${COLOR_RESET}  %-20s %s\n" "$name" "$email"
+      else
+        printf "    ${COLOR_YELLOW}✗${COLOR_RESET}  %-20s\n" "$name"
+      fi
+    done <<< "$profiles"
+  fi
+  echo ""
+}
+
+cmd_setup() {
+  local existing; existing=$(_list_profiles)
+
+  printf '\n'
+  printf '  ┌─────────────────────────────────────────────┐\n'
+  printf '  │  claude-profile-manager setup               │\n'
+  printf '  │  Claude Code multi-account session manager  │\n'
+  printf '  └─────────────────────────────────────────────┘\n'
+  printf '\n'
+
+  if [ -n "$existing" ]; then
+    printf '  Profiles already configured:\n'
+    while IFS= read -r p; do
+      printf '    • %s\n' "$p"
+    done <<< "$existing"
+    printf '\n'
+    printf '  Add new account:  cpm create <name>\n'
+    printf '  Clone current:    cpm clone <name>\n\n'
+    return
+  fi
+
+  # Step 1: first profile
+  printf '  Step 1/2  Save your current logged-in account as the first profile.\n'
+  printf '            Profile name (e.g. work, personal): '
+  read -r first_name
+  first_name="${first_name%% *}"
+
+  if [ -z "$first_name" ]; then
+    printf '\n  Skipped. Add later with cpm clone <name>.\n\n'
+  else
+    if [[ ! "$first_name" =~ ^[A-Za-z0-9_.-]{1,64}$ ]] || [[ "$first_name" == -* ]]; then
+      printf '\n  Invalid name. Use alphanumeric characters and _ . - only.\n\n'
+      return 1
+    fi
+    cmd_clone "$first_name"
+  fi
+
+  printf '\n'
+
+  # Step 2: second profile
+  printf '  Step 2/2  Would you like to add another Claude account? (y/N): '
+  read -r add_second
+  add_second="${add_second%% *}"
+
+  case "$add_second" in
+    [yY]|[yY][eE][sS])
+      printf '            New profile name: '
+      read -r second_name
+      second_name="${second_name%% *}"
+      if [ -n "$second_name" ]; then
+        printf '\n'
+        cmd_create "$second_name"
+      fi
+      ;;
+    *)
+      printf '  Add later with: cpm create <name>\n'
+      ;;
+  esac
+
+  printf '\n'
+  printf '  ─────────────────────────────────────────────\n'
+  printf '  Setup complete!\n\n'
+  printf '  cpm status      Show profile status\n'
+  printf '  cpm <name>      Run Claude with that account\n\n'
+}
+
+cmd_statusline() {
+  local share_dir
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    share_dir="/usr/local/share"
+  else
+    share_dir="$HOME/.local/share"
+  fi
+
+  local src="$share_dir/claude-profile-manager/statusline-command.sh"
+  local dest="$CLAUDE_DEFAULT_DIR/statusline-command.sh"
+  local settings="$CLAUDE_DEFAULT_DIR/settings.json"
+
+  if [ ! -f "$src" ]; then
+    echo "Error: statusline script not found: $src" >&2
+    echo "  Run the install script first." >&2
+    exit 1
+  fi
+
+  cp "$src" "$dest"
+  chmod 755 "$dest"
+
+  python3 -c "
+import json, sys
+settings_path = '$settings'
+try:
+    with open(settings_path) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {}
+data['statusLine'] = {'type': 'command', 'command': 'bash $dest'}
+with open(settings_path, 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+" || { echo "Error: failed to update settings.json" >&2; exit 1; }
+
+  printf "\nClaude Code statusline configured\n"
+  printf "  Script: %s\n" "$dest"
+  printf "  Config: %s\n" "$settings"
+  printf "\nRun 'cpm <profile>' to display the profile name in the statusline.\n\n"
+}
+
+cmd_help() {
+  cat <<'EOF'
+
+Usage: cpm [profile | command] [args...]
+
+  Run Profile
+  ──────────────────────────────────────────────────────
+  cpm                        Show profile status (runs claude if none)
+  cpm <profile>              Run claude with the given profile
+  cpm <profile> [options...] Pass any claude options
+
+  Profile Management
+  ──────────────────────────────────────────────────────
+  cpm create <name>          Create a new profile and log in immediately
+  cpm clone <name>           Clone the current account into a new profile
+  cpm rename <old> <new>     Rename a profile
+  cpm remove <name>          Delete a profile
+
+  Other
+  ──────────────────────────────────────────────────────
+  cpm status                 List profiles and associated accounts
+  cpm setup                  Interactive initial setup wizard
+  cpm doctor                 Check environment and authentication status
+  cpm statusline             Configure Claude Code statusline
+  cpm help                   Print this help
+
+  How It Works
+  ──────────────────────────────────────────────────────
+  Each profile uses an independent CLAUDE_CONFIG_DIR (~/.claude-<name>/).
+  Settings, memory, and history are shared via ~/.claude/; only credentials are isolated per profile.
+  Multiple terminals can run different accounts simultaneously.
+
+EOF
+}
+
+# ────────────────────────────────────────────
+# Entry point
+# ────────────────────────────────────────────
+
+main() {
+  local command="${1:-}"
+
+  case "$command" in
+    create)    cmd_create "${2:-}" ;;
+    clone)     cmd_clone "${2:-}" ;;
+    rename)    cmd_rename "${2:-}" "${3:-}" ;;
+    remove)    cmd_remove "${2:-}" ;;
+    status)    cmd_status ;;
+    list)      cmd_list ;;
+    doctor)    cmd_doctor ;;
+    setup)     cmd_setup ;;
+    statusline) cmd_statusline ;;
+    help|--help|-h|"") cmd_help ;;
+    *)
+      echo "Error: unknown command '${command}'." >&2
+      echo "  Available commands: create, clone, rename, remove, status, setup, doctor, statusline, help" >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
