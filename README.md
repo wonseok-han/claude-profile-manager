@@ -133,6 +133,7 @@ cpm work -r      # Resume session
 |---------|-------------|
 | `cpm create <name>` | Create a new profile and log in immediately |
 | `cpm clone <name>` | Clone the current account into a new profile |
+| `cpm refresh <name>` | Refresh expired credentials without re-login |
 | `cpm rename <old> <new>` | Rename a profile |
 | `cpm remove <name>` | Delete a profile |
 
@@ -157,6 +158,7 @@ cpm status
 | `cpm setup` | Interactive initial setup wizard |
 | `cpm doctor` | Check environment and authentication status |
 | `cpm statusline` | Set up profile name display in Claude Code statusline |
+| `cpm uninstall` | Remove claude-profile-manager from system |
 | `cpm help` | Print help |
 
 ### Profile Name Rules
