@@ -18,7 +18,7 @@ _claude_profile_manager_fn() {
         command claude
       fi
       ;;
-    status|list|create|clone|remove|rename|doctor|setup|statusline|help|--help|-h)
+    status|list|create|clone|refresh|remove|rename|doctor|setup|statusline|help|--help|-h)
       command claude-profile-manager "$@"
       ;;
     *)
@@ -61,6 +61,7 @@ _claude_profile_manager_completions() {
       builtins=(
         'create:Create a new profile and log in immediately'
         'clone:Clone the current account into a new profile'
+        'refresh:Refresh expired credentials'
         'status:Show all profiles'
         'rename:Rename a profile'
         'remove:Delete a profile'
@@ -75,7 +76,7 @@ _claude_profile_manager_completions() {
       ;;
     arg)
       case "${words[2]}" in
-        remove|rename)
+        remove|rename|refresh)
           local -a profiles
           if command -v claude-profile-manager >/dev/null 2>&1; then
             profiles=(${(f)"$(command claude-profile-manager list 2>/dev/null)"})

@@ -18,7 +18,7 @@ _claude_profile_manager_fn() {
         command claude
       fi
       ;;
-    status|list|create|clone|remove|rename|doctor|setup|statusline|help|--help|-h)
+    status|list|create|clone|refresh|remove|rename|doctor|setup|statusline|help|--help|-h)
       command claude-profile-manager "$@"
       ;;
     *)
@@ -45,7 +45,7 @@ _claude_profile_manager_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   local prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local commands="create clone status rename remove setup doctor statusline help"
+  local commands="create clone refresh status rename remove setup doctor statusline help"
   local profiles=""
   if command -v claude-profile-manager >/dev/null 2>&1; then
     profiles=$(command claude-profile-manager list 2>/dev/null || true)
@@ -56,7 +56,7 @@ _claude_profile_manager_completions() {
     COMPREPLY=($(compgen -W "$candidates" -- "$cur"))
   elif [ "$COMP_CWORD" -eq 2 ]; then
     case "$prev" in
-      remove|rename)
+      remove|rename|refresh)
         COMPREPLY=($(compgen -W "$profiles" -- "$cur"))
         ;;
     esac

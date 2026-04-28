@@ -62,7 +62,7 @@ _validate_profile_name() {
     exit 1
   fi
   case "$name" in
-    create|clone|rename|remove|status|list|doctor|setup|statusline|help)
+    create|clone|refresh|rename|remove|status|list|doctor|setup|statusline|help)
       _error "'${name}' is a reserved word and cannot be used as a profile name."
       exit 1
       ;;
@@ -164,6 +164,38 @@ cmd_create() {
     printf "  Run ${COLOR_CYAN}cpm %s${COLOR_RESET} to start.\n" "$profile"
   else
     printf "\n  ${COLOR_YELLOW}Login may not have completed.${COLOR_RESET} Run ${COLOR_CYAN}cpm %s${COLOR_RESET} again to log in.\n" "$profile"
+  fi
+}
+
+cmd_refresh() {
+  local profile="$1"
+  _validate_profile_name "$profile"
+
+  local profile_dir; profile_dir="$(_profile_dir "$profile")"
+
+  if [ ! -d "$profile_dir" ]; then
+    _error "Profile '${profile}' does not exist."
+    exit 1
+  fi
+
+  printf "  Refreshing credentials for ${COLOR_BOLD}'%s'${COLOR_RESET}..." "$profile"
+
+  local auth_result
+  auth_result=$(CLAUDE_CONFIG_DIR="$profile_dir" command claude auth status 2>&1) || true
+
+  if echo "$auth_result" | grep -q '"loggedIn": true'; then
+    printf "\r"
+    local email
+    email=$(echo "$auth_result" | python3 -c "import json,sys; print(json.load(sys.stdin).get('email',''))" 2>/dev/null) || true
+    if [ -n "$email" ]; then
+      _success "Credentials refreshed for '${profile}' (${email})."
+    else
+      _success "Credentials refreshed for '${profile}'."
+    fi
+  else
+    printf "\n"
+    _error "Failed to refresh. Token may have fully expired."
+    printf "  ${COLOR_DIM}Try:${COLOR_RESET} ${COLOR_CYAN}cpm remove %s && cpm create %s${COLOR_RESET}\n" "$profile" "$profile"
   fi
 }
 
@@ -461,6 +493,7 @@ cmd_help() {
   printf "  ${COLOR_CYAN}cpm create${COLOR_RESET} ${COLOR_DIM}<name>${COLOR_RESET}          Create a new profile and log in immediately\n"
   printf "  ${COLOR_CYAN}cpm clone${COLOR_RESET}  ${COLOR_DIM}<name>${COLOR_RESET}          Clone the current account into a new profile\n"
   printf "  ${COLOR_CYAN}cpm rename${COLOR_RESET} ${COLOR_DIM}<old> <new>${COLOR_RESET}     Rename a profile\n"
+  printf "  ${COLOR_CYAN}cpm refresh${COLOR_RESET} ${COLOR_DIM}<name>${COLOR_RESET}         Refresh expired credentials\n"
   printf "  ${COLOR_CYAN}cpm remove${COLOR_RESET} ${COLOR_DIM}<name>${COLOR_RESET}          Delete a profile\n"
   echo ""
 
@@ -492,6 +525,7 @@ main() {
   case "$command" in
     create)    cmd_create "${2:-}" ;;
     clone)     cmd_clone "${2:-}" ;;
+    refresh)   cmd_refresh "${2:-}" ;;
     rename)    cmd_rename "${2:-}" "${3:-}" ;;
     remove)    cmd_remove "${2:-}" ;;
     status)    cmd_status ;;
@@ -502,7 +536,7 @@ main() {
     help|--help|-h|"") cmd_help ;;
     *)
       _error "Unknown command '${command}'."
-      printf "  ${COLOR_DIM}  Available: create, clone, rename, remove, status, setup, doctor, statusline, help${COLOR_RESET}\n" >&2
+      printf "  ${COLOR_DIM}  Available: create, clone, refresh, rename, remove, status, setup, doctor, statusline, help${COLOR_RESET}\n" >&2
       exit 1
       ;;
   esac
