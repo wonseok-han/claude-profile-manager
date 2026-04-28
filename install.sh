@@ -232,7 +232,7 @@ _add_to_rc() {
   echo ""
 
   printf "  Add automatically now? (y/N): "
-  read -r auto_add
+  read -r auto_add < /dev/tty
   auto_add="${auto_add%% *}"
   case "$auto_add" in
     [yY]|[yY][eE][sS])
