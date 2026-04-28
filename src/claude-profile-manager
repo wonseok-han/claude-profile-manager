@@ -9,18 +9,39 @@ PROFILE_PREFIX=".claude-"
 CLAUDE_DEFAULT_DIR="$HOME/.claude"
 
 if [ -t 1 ]; then
+  COLOR_BOLD="\033[1m"
+  COLOR_DIM="\033[2m"
+  COLOR_RED="\033[0;31m"
   COLOR_GREEN="\033[0;32m"
   COLOR_YELLOW="\033[0;33m"
+  COLOR_CYAN="\033[0;36m"
   COLOR_RESET="\033[0m"
 else
+  COLOR_BOLD=""
+  COLOR_DIM=""
+  COLOR_RED=""
   COLOR_GREEN=""
   COLOR_YELLOW=""
+  COLOR_CYAN=""
   COLOR_RESET=""
 fi
 
 # ────────────────────────────────────────────
 # Utilities
 # ────────────────────────────────────────────
+
+_error() {
+  printf "  ${COLOR_RED}✗ %s${COLOR_RESET}\n" "$1" >&2
+}
+
+_success() {
+  printf "  ${COLOR_GREEN}✓ %s${COLOR_RESET}\n" "$1"
+}
+
+_header() {
+  printf "\n${COLOR_BOLD}  %s${COLOR_RESET}\n" "$1"
+  printf "  ${COLOR_DIM}─────────────────────────────────────────────────${COLOR_RESET}\n"
+}
 
 _profile_dir() {
   printf '%s/%s%s' "$PROFILE_HOME" "$PROFILE_PREFIX" "$1"
@@ -29,20 +50,20 @@ _profile_dir() {
 _validate_profile_name() {
   local name="$1"
   if [ -z "$name" ]; then
-    echo "Error: profile name is required." >&2
+    _error "Profile name is required."
     exit 1
   fi
   if [[ ! "$name" =~ ^[A-Za-z0-9_.-]{1,64}$ ]]; then
-    echo "Error: profile name must use alphanumeric characters and _ . - only, 1–64 characters." >&2
+    _error "Profile name must use alphanumeric characters and _ . - only, 1–64 characters."
     exit 1
   fi
   if [[ "$name" == -* ]]; then
-    echo "Error: profile name cannot start with '-'." >&2
+    _error "Profile name cannot start with '-'."
     exit 1
   fi
   case "$name" in
     create|clone|rename|remove|status|list|doctor|setup|statusline|help)
-      echo "Error: '${name}' is a reserved word and cannot be used as a profile name." >&2
+      _error "'${name}' is a reserved word and cannot be used as a profile name."
       exit 1
       ;;
   esac
@@ -113,15 +134,15 @@ cmd_create() {
   local profile_dir; profile_dir="$(_profile_dir "$profile")"
 
   if [ -d "$profile_dir" ]; then
-    echo "Error: profile '${profile}' already exists: $profile_dir" >&2
+    _error "Profile '${profile}' already exists: $profile_dir"
     exit 1
   fi
 
   _setup_profile_dir "$profile_dir"
 
-  printf "Profile '%s' created\n" "$profile"
-  printf "  settings, memory, history: ~/.claude/ shared (symlink)\n"
-  printf "\nNew account login required. Launching Claude...\n\n"
+  _success "Profile '${profile}' created"
+  printf "  ${COLOR_DIM}shared: settings, memory, history (symlinked from ~/.claude/)${COLOR_RESET}\n"
+  printf "\n  New account login required. Launching Claude...\n\n"
 
   CLAUDE_CONFIG_DIR="$profile_dir" claude
 
@@ -139,9 +160,10 @@ cmd_create() {
   fi
 
   if [ -f "$profile_dir/.credentials.json" ]; then
-    printf "\nLogin complete. Use 'cpm %s' to run.\n" "$profile"
+    _success "Login complete."
+    printf "  Run ${COLOR_CYAN}cpm %s${COLOR_RESET} to start.\n" "$profile"
   else
-    printf "\nLogin may not have completed. Run 'cpm %s' again to log in.\n" "$profile"
+    printf "\n  ${COLOR_YELLOW}Login may not have completed.${COLOR_RESET} Run ${COLOR_CYAN}cpm %s${COLOR_RESET} again to log in.\n" "$profile"
   fi
 }
 
@@ -152,7 +174,7 @@ cmd_clone() {
   local profile_dir; profile_dir="$(_profile_dir "$profile")"
 
   if [ -d "$profile_dir" ]; then
-    echo "Error: profile '${profile}' already exists: $profile_dir" >&2
+    _error "Profile '${profile}' already exists: $profile_dir"
     exit 1
   fi
 
@@ -168,19 +190,19 @@ cmd_clone() {
     creds=$(security find-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w 2>/dev/null) || true
     if [ -n "$creds" ]; then
       ( umask 077; printf '%s' "$creds" > "$profile_dir/.credentials.json" )
-      printf '  Keychain credentials copied\n'
+      printf "  ${COLOR_DIM}Keychain credentials copied${COLOR_RESET}\n"
     fi
   fi
 
   if [[ "$(uname -s)" != "Darwin" ]] && [ -f "$CLAUDE_DEFAULT_DIR/.credentials.json" ]; then
     cp "$CLAUDE_DEFAULT_DIR/.credentials.json" "$profile_dir/.credentials.json"
     chmod 600 "$profile_dir/.credentials.json"
-    printf '  Credentials copied\n'
+    printf "  ${COLOR_DIM}Credentials copied${COLOR_RESET}\n"
   fi
 
-  printf "Profile '%s' created\n" "$profile"
-  printf "  account: %s\n" "$(_profile_email "$profile_dir")"
-  printf "  run:     cpm %s\n" "$profile"
+  _success "Profile '${profile}' created"
+  printf "  ${COLOR_DIM}account:${COLOR_RESET} %s\n" "$(_profile_email "$profile_dir")"
+  printf "  ${COLOR_DIM}run:${COLOR_RESET}     ${COLOR_CYAN}cpm %s${COLOR_RESET}\n" "$profile"
 }
 
 cmd_list() {
@@ -192,7 +214,7 @@ cmd_list() {
   if [ -t 1 ]; then
     echo ""
     while IFS= read -r profile; do
-      printf "  • %s\n" "$profile"
+      printf "  ${COLOR_CYAN}•${COLOR_RESET} %s\n" "$profile"
     done <<< "$profiles"
     echo ""
   else
@@ -207,22 +229,22 @@ cmd_remove() {
   local profile_dir; profile_dir="$(_profile_dir "$profile")"
 
   if [ ! -d "$profile_dir" ]; then
-    echo "Error: profile '${profile}' does not exist." >&2
+    _error "Profile '${profile}' does not exist."
     exit 1
   fi
 
-  printf "Delete profile '%s'?\n" "$profile"
-  printf "  Path: %s\n" "$profile_dir"
-  printf "Deleting removes all credentials for this profile. Continue? (y/N): "
+  printf "\n  Delete profile ${COLOR_BOLD}'%s'${COLOR_RESET}?\n" "$profile"
+  printf "  ${COLOR_DIM}Path: %s${COLOR_RESET}\n" "$profile_dir"
+  printf "  ${COLOR_YELLOW}This removes all credentials for this profile.${COLOR_RESET} Continue? (y/N): "
   read -r confirm
   confirm="${confirm%% *}"
   case "$confirm" in
     [yY]|[yY][eE][sS])
       rm -rf "$profile_dir"
-      printf "Profile '%s' deleted\n" "$profile"
+      _success "Profile '${profile}' deleted"
       ;;
     *)
-      echo "Cancelled."
+      echo "  Cancelled."
       ;;
   esac
 }
@@ -238,32 +260,30 @@ cmd_rename() {
   local new_dir; new_dir="$(_profile_dir "$new_name")"
 
   if [ ! -d "$old_dir" ]; then
-    echo "Error: profile '${old_name}' does not exist." >&2
+    _error "Profile '${old_name}' does not exist."
     exit 1
   fi
 
   if [ -d "$new_dir" ]; then
-    echo "Error: profile '${new_name}' already exists." >&2
+    _error "Profile '${new_name}' already exists."
     exit 1
   fi
 
   mv "$old_dir" "$new_dir"
-  printf "Profile renamed: '%s' → '%s'\n" "$old_name" "$new_name"
+  _success "Profile renamed: '${old_name}' → '${new_name}'"
 }
 
 cmd_status() {
   local profiles; profiles=$(_list_profiles)
 
-  echo ""
-  printf "  %-20s %s\n" "profile" "account"
-  echo "  ─────────────────────────────────────────────────"
+  _header "Profiles"
 
   if [ -z "$profiles" ]; then
-    echo "  No saved profiles."
-    echo ""
-    echo "  Add new account:  cpm create <name>"
-    echo "  Clone current:    cpm clone <name>"
+    printf "\n  ${COLOR_DIM}No saved profiles.${COLOR_RESET}\n\n"
+    printf "  Add new account:  ${COLOR_CYAN}cpm create <name>${COLOR_RESET}\n"
+    printf "  Clone current:    ${COLOR_CYAN}cpm clone <name>${COLOR_RESET}\n"
   else
+    printf "  ${COLOR_DIM}    %-20s %s${COLOR_RESET}\n" "NAME" "ACCOUNT"
     while IFS= read -r profile; do
       [ -z "$profile" ] && continue
       local dir; dir="$(_profile_dir "$profile")"
@@ -272,7 +292,7 @@ cmd_status() {
       if [[ "$email" != "(login required)" ]]; then
         printf "  ${COLOR_GREEN}✓${COLOR_RESET}  %-20s %s\n" "$name" "$email"
       else
-        printf "  ${COLOR_YELLOW}✗${COLOR_RESET}  %-20s\n" "$name"
+        printf "  ${COLOR_YELLOW}✗${COLOR_RESET}  %-20s ${COLOR_DIM}(login required)${COLOR_RESET}\n" "$name"
       fi
     done <<< "$profiles"
   fi
@@ -281,27 +301,26 @@ cmd_status() {
 }
 
 cmd_doctor() {
-  echo ""
-  echo "  claude-profile-manager — Environment Info"
-  echo "  ──────────────────────────────────────────"
-  printf "  Default Claude directory: %s\n" "$CLAUDE_DEFAULT_DIR"
-  printf "  Profile location pattern: %s/.claude-<name>/\n" "$HOME"
+  _header "Environment"
+
+  printf "  ${COLOR_DIM}Default directory:${COLOR_RESET}  %s\n" "$CLAUDE_DEFAULT_DIR"
+  printf "  ${COLOR_DIM}Profile pattern:${COLOR_RESET}    %s/.claude-<name>/\n" "$HOME"
   echo ""
 
-  echo "  claude command:"
+  printf "  ${COLOR_BOLD}claude${COLOR_RESET}\n"
   if command -v claude >/dev/null 2>&1; then
-    printf "    Path: %s\n" "$(command -v claude)"
+    printf "    ${COLOR_GREEN}✓${COLOR_RESET} %s\n" "$(command -v claude)"
   else
-    echo "    ✗ claude command not found."
+    printf "    ${COLOR_YELLOW}✗${COLOR_RESET} claude command not found\n"
   fi
   echo ""
 
-  echo "  profiles:"
-  printf "    %-3s %-18s %s\n" "" "name" "account"
-  echo "    ──────────────────────────────────────────"
+  printf "  ${COLOR_BOLD}profiles${COLOR_RESET}\n"
+  printf "    ${COLOR_DIM}%-3s %-18s %s${COLOR_RESET}\n" "" "NAME" "ACCOUNT"
+  printf "    ${COLOR_DIM}──────────────────────────────────────────${COLOR_RESET}\n"
   local profiles; profiles=$(_list_profiles)
   if [ -z "$profiles" ]; then
-    echo "    None — create with 'cpm create <name>'"
+    printf "    ${COLOR_DIM}None — create with${COLOR_RESET} ${COLOR_CYAN}cpm create <name>${COLOR_RESET}\n"
   else
     while IFS= read -r profile; do
       local dir; dir="$(_profile_dir "$profile")"
@@ -310,7 +329,7 @@ cmd_doctor() {
       if [[ "$email" != "(login required)" ]]; then
         printf "    ${COLOR_GREEN}✓${COLOR_RESET}  %-20s %s\n" "$name" "$email"
       else
-        printf "    ${COLOR_YELLOW}✗${COLOR_RESET}  %-20s\n" "$name"
+        printf "    ${COLOR_YELLOW}✗${COLOR_RESET}  %-20s ${COLOR_DIM}(login required)${COLOR_RESET}\n" "$name"
       fi
     done <<< "$profiles"
   fi
@@ -321,34 +340,34 @@ cmd_setup() {
   local existing; existing=$(_list_profiles)
 
   printf '\n'
-  printf '  ┌─────────────────────────────────────────────┐\n'
-  printf '  │  claude-profile-manager setup               │\n'
-  printf '  │  Claude Code multi-account session manager  │\n'
-  printf '  └─────────────────────────────────────────────┘\n'
+  printf "  ${COLOR_CYAN}┌─────────────────────────────────────────────┐${COLOR_RESET}\n"
+  printf "  ${COLOR_CYAN}│${COLOR_RESET}  ${COLOR_BOLD}claude-profile-manager${COLOR_RESET} setup               ${COLOR_CYAN}│${COLOR_RESET}\n"
+  printf "  ${COLOR_CYAN}│${COLOR_RESET}  ${COLOR_DIM}Claude Code multi-account session manager${COLOR_RESET}  ${COLOR_CYAN}│${COLOR_RESET}\n"
+  printf "  ${COLOR_CYAN}└─────────────────────────────────────────────┘${COLOR_RESET}\n"
   printf '\n'
 
   if [ -n "$existing" ]; then
-    printf '  Profiles already configured:\n'
+    printf "  ${COLOR_BOLD}Profiles already configured:${COLOR_RESET}\n"
     while IFS= read -r p; do
-      printf '    • %s\n' "$p"
+      printf "    ${COLOR_CYAN}•${COLOR_RESET} %s\n" "$p"
     done <<< "$existing"
     printf '\n'
-    printf '  Add new account:  cpm create <name>\n'
-    printf '  Clone current:    cpm clone <name>\n\n'
+    printf "  Add new account:  ${COLOR_CYAN}cpm create <name>${COLOR_RESET}\n"
+    printf "  Clone current:    ${COLOR_CYAN}cpm clone <name>${COLOR_RESET}\n\n"
     return
   fi
 
   # Step 1: first profile
-  printf '  Step 1/2  Save your current logged-in account as the first profile.\n'
+  printf "  ${COLOR_BOLD}Step 1/2${COLOR_RESET}  Save your current logged-in account as the first profile.\n"
   printf '            Profile name (e.g. work, personal): '
   read -r first_name
   first_name="${first_name%% *}"
 
   if [ -z "$first_name" ]; then
-    printf '\n  Skipped. Add later with cpm clone <name>.\n\n'
+    printf "\n  Skipped. Add later with ${COLOR_CYAN}cpm clone <name>${COLOR_RESET}.\n\n"
   else
     if [[ ! "$first_name" =~ ^[A-Za-z0-9_.-]{1,64}$ ]] || [[ "$first_name" == -* ]]; then
-      printf '\n  Invalid name. Use alphanumeric characters and _ . - only.\n\n'
+      _error "Invalid name. Use alphanumeric characters and _ . - only."
       return 1
     fi
     cmd_clone "$first_name"
@@ -357,7 +376,7 @@ cmd_setup() {
   printf '\n'
 
   # Step 2: second profile
-  printf '  Step 2/2  Would you like to add another Claude account? (y/N): '
+  printf "  ${COLOR_BOLD}Step 2/2${COLOR_RESET}  Would you like to add another Claude account? (y/N): "
   read -r add_second
   add_second="${add_second%% *}"
 
@@ -372,15 +391,16 @@ cmd_setup() {
       fi
       ;;
     *)
-      printf '  Add later with: cpm create <name>\n'
+      printf "  Add later with: ${COLOR_CYAN}cpm create <name>${COLOR_RESET}\n"
       ;;
   esac
 
   printf '\n'
-  printf '  ─────────────────────────────────────────────\n'
-  printf '  Setup complete!\n\n'
-  printf '  cpm status      Show profile status\n'
-  printf '  cpm <name>      Run Claude with that account\n\n'
+  printf "  ${COLOR_DIM}─────────────────────────────────────────────${COLOR_RESET}\n"
+  _success "Setup complete!"
+  echo ""
+  printf "  ${COLOR_CYAN}cpm status${COLOR_RESET}      Show profile status\n"
+  printf "  ${COLOR_CYAN}cpm${COLOR_RESET} ${COLOR_DIM}<name>${COLOR_RESET}      Run Claude with that account\n\n"
 }
 
 cmd_statusline() {
@@ -396,8 +416,8 @@ cmd_statusline() {
   local settings="$CLAUDE_DEFAULT_DIR/settings.json"
 
   if [ ! -f "$src" ]; then
-    echo "Error: statusline script not found: $src" >&2
-    echo "  Run the install script first." >&2
+    _error "Statusline script not found: $src"
+    printf "  Run the install script first.\n" >&2
     exit 1
   fi
 
@@ -416,47 +436,50 @@ data['statusLine'] = {'type': 'command', 'command': 'bash $dest'}
 with open(settings_path, 'w') as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write('\n')
-" || { echo "Error: failed to update settings.json" >&2; exit 1; }
+" || { _error "Failed to update settings.json"; exit 1; }
 
-  printf "\nClaude Code statusline configured\n"
-  printf "  Script: %s\n" "$dest"
-  printf "  Config: %s\n" "$settings"
-  printf "\nRun 'cpm <profile>' to display the profile name in the statusline.\n\n"
+  _success "Claude Code statusline configured"
+  printf "  ${COLOR_DIM}Script:${COLOR_RESET} %s\n" "$dest"
+  printf "  ${COLOR_DIM}Config:${COLOR_RESET} %s\n" "$settings"
+  printf "\n  Run ${COLOR_CYAN}cpm <profile>${COLOR_RESET} to display the profile name in the statusline.\n\n"
 }
 
 cmd_help() {
-  cat <<'EOF'
+  echo ""
+  printf "  ${COLOR_BOLD}Usage:${COLOR_RESET} ${COLOR_CYAN}cpm${COLOR_RESET} ${COLOR_DIM}[profile | command] [args...]${COLOR_RESET}\n"
+  echo ""
 
-Usage: cpm [profile | command] [args...]
+  printf "  ${COLOR_BOLD}Run Profile${COLOR_RESET}\n"
+  printf "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}\n"
+  printf "  ${COLOR_CYAN}cpm${COLOR_RESET}                        Show profile status (runs claude if none)\n"
+  printf "  ${COLOR_CYAN}cpm${COLOR_RESET} ${COLOR_DIM}<profile>${COLOR_RESET}              Run claude with the given profile\n"
+  printf "  ${COLOR_CYAN}cpm${COLOR_RESET} ${COLOR_DIM}<profile> [options...]${COLOR_RESET} Pass any claude options\n"
+  echo ""
 
-  Run Profile
-  ──────────────────────────────────────────────────────
-  cpm                        Show profile status (runs claude if none)
-  cpm <profile>              Run claude with the given profile
-  cpm <profile> [options...] Pass any claude options
+  printf "  ${COLOR_BOLD}Profile Management${COLOR_RESET}\n"
+  printf "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}\n"
+  printf "  ${COLOR_CYAN}cpm create${COLOR_RESET} ${COLOR_DIM}<name>${COLOR_RESET}          Create a new profile and log in immediately\n"
+  printf "  ${COLOR_CYAN}cpm clone${COLOR_RESET}  ${COLOR_DIM}<name>${COLOR_RESET}          Clone the current account into a new profile\n"
+  printf "  ${COLOR_CYAN}cpm rename${COLOR_RESET} ${COLOR_DIM}<old> <new>${COLOR_RESET}     Rename a profile\n"
+  printf "  ${COLOR_CYAN}cpm remove${COLOR_RESET} ${COLOR_DIM}<name>${COLOR_RESET}          Delete a profile\n"
+  echo ""
 
-  Profile Management
-  ──────────────────────────────────────────────────────
-  cpm create <name>          Create a new profile and log in immediately
-  cpm clone <name>           Clone the current account into a new profile
-  cpm rename <old> <new>     Rename a profile
-  cpm remove <name>          Delete a profile
+  printf "  ${COLOR_BOLD}Other${COLOR_RESET}\n"
+  printf "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}\n"
+  printf "  ${COLOR_CYAN}cpm status${COLOR_RESET}                 List profiles and associated accounts\n"
+  printf "  ${COLOR_CYAN}cpm setup${COLOR_RESET}                  Interactive initial setup wizard\n"
+  printf "  ${COLOR_CYAN}cpm doctor${COLOR_RESET}                 Check environment and authentication status\n"
+  printf "  ${COLOR_CYAN}cpm statusline${COLOR_RESET}             Configure Claude Code statusline\n"
+  printf "  ${COLOR_CYAN}cpm help${COLOR_RESET}                   Print this help\n"
+  echo ""
 
-  Other
-  ──────────────────────────────────────────────────────
-  cpm status                 List profiles and associated accounts
-  cpm setup                  Interactive initial setup wizard
-  cpm doctor                 Check environment and authentication status
-  cpm statusline             Configure Claude Code statusline
-  cpm help                   Print this help
-
-  How It Works
-  ──────────────────────────────────────────────────────
-  Each profile uses an independent CLAUDE_CONFIG_DIR (~/.claude-<name>/).
-  Settings, memory, and history are shared via ~/.claude/; only credentials are isolated per profile.
-  Multiple terminals can run different accounts simultaneously.
-
-EOF
+  printf "  ${COLOR_BOLD}How It Works${COLOR_RESET}\n"
+  printf "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}\n"
+  printf "  Each profile uses an independent ${COLOR_CYAN}CLAUDE_CONFIG_DIR${COLOR_RESET} (~/.claude-<name>/).\n"
+  printf "  Settings, memory, and history are shared via ~/.claude/; only credentials\n"
+  printf "  are isolated per profile. Multiple terminals can run different accounts\n"
+  printf "  simultaneously.\n"
+  echo ""
 }
 
 # ────────────────────────────────────────────
@@ -478,8 +501,8 @@ main() {
     statusline) cmd_statusline ;;
     help|--help|-h|"") cmd_help ;;
     *)
-      echo "Error: unknown command '${command}'." >&2
-      echo "  Available commands: create, clone, rename, remove, status, setup, doctor, statusline, help" >&2
+      _error "Unknown command '${command}'."
+      printf "  ${COLOR_DIM}  Available: create, clone, rename, remove, status, setup, doctor, statusline, help${COLOR_RESET}\n" >&2
       exit 1
       ;;
   esac

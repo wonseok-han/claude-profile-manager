@@ -8,6 +8,32 @@ set -e
 
 GITHUB_REPO="https://raw.githubusercontent.com/USER/claude-profile-manager/main"
 
+if [ -t 1 ]; then
+  COLOR_BOLD="\033[1m"
+  COLOR_DIM="\033[2m"
+  COLOR_RED="\033[0;31m"
+  COLOR_GREEN="\033[0;32m"
+  COLOR_YELLOW="\033[0;33m"
+  COLOR_CYAN="\033[0;36m"
+  COLOR_RESET="\033[0m"
+else
+  COLOR_BOLD=""
+  COLOR_DIM=""
+  COLOR_RED=""
+  COLOR_GREEN=""
+  COLOR_YELLOW=""
+  COLOR_CYAN=""
+  COLOR_RESET=""
+fi
+
+_error() {
+  printf "  ${COLOR_RED}✗ %s${COLOR_RESET}\n" "$1" >&2
+}
+
+_success() {
+  printf "  ${COLOR_GREEN}✓ %s${COLOR_RESET}\n" "$1"
+}
+
 # ────────────────────────────────────────────
 # Platform detection
 # ────────────────────────────────────────────
@@ -46,10 +72,11 @@ fi
 ZSHRC_BEGIN="# BEGIN claude-profile-manager"
 ZSHRC_END="# END claude-profile-manager"
 
-echo "======================================"
-echo "  claude-profile-manager install"
-echo "  Platform: $PLATFORM"
-echo "======================================"
+echo ""
+printf "  ${COLOR_CYAN}┌──────────────────────────────────────┐${COLOR_RESET}\n"
+printf "  ${COLOR_CYAN}│${COLOR_RESET}  ${COLOR_BOLD}claude-profile-manager${COLOR_RESET} install      ${COLOR_CYAN}│${COLOR_RESET}\n"
+printf "  ${COLOR_CYAN}│${COLOR_RESET}  ${COLOR_DIM}Platform: %-26s${COLOR_RESET}${COLOR_CYAN}│${COLOR_RESET}\n" "$PLATFORM"
+printf "  ${COLOR_CYAN}└──────────────────────────────────────┘${COLOR_RESET}\n"
 echo ""
 
 # ────────────────────────────────────────────
@@ -64,13 +91,13 @@ trap _cleanup EXIT
 
 if [ ! -f "$SRC_DIR/claude-profile-manager" ]; then
   if ! command -v curl >/dev/null 2>&1; then
-    echo "Error: curl not found. Install via git clone:" >&2
-    echo "  git clone https://github.com/USER/claude-profile-manager.git" >&2
-    echo "  cd claude-profile-manager && bash install.sh" >&2
+    _error "curl not found. Install via git clone:"
+    printf "    ${COLOR_CYAN}git clone https://github.com/USER/claude-profile-manager.git${COLOR_RESET}\n" >&2
+    printf "    ${COLOR_CYAN}cd claude-profile-manager && bash install.sh${COLOR_RESET}\n" >&2
     exit 1
   fi
 
-  echo "Downloading files from GitHub..."
+  printf "  ${COLOR_BOLD}Downloading files from GitHub...${COLOR_RESET}\n"
   _TEMP_DIR=$(mktemp -d)
   mkdir -p "$_TEMP_DIR/src"
 
@@ -84,9 +111,9 @@ if [ ! -f "$SRC_DIR/claude-profile-manager" ]; then
   for _f in "${_files[@]}"; do
     _fname="${_f##*/}"
     if curl -fsSL "$GITHUB_REPO/$_f" -o "$_TEMP_DIR/src/$_fname"; then
-      echo "  ✓ $_fname"
+      _success "$_fname"
     else
-      echo "Error: failed to download $_fname" >&2
+      _error "Failed to download $_fname"
       exit 1
     fi
   done
@@ -100,7 +127,7 @@ fi
 # ────────────────────────────────────────────
 for _required in claude-profile-manager claude-profile-manager.zsh claude-profile-manager.bash statusline-command.sh; do
   if [ ! -f "$SRC_DIR/$_required" ]; then
-    echo "Error: '$SRC_DIR/$_required' not found." >&2
+    _error "'$SRC_DIR/$_required' not found."
     exit 1
   fi
 done
@@ -109,8 +136,8 @@ done
 # sudo handling (macOS only)
 # ────────────────────────────────────────────
 if [ "$NEED_SUDO" = true ]; then
-  echo "sudo privileges are required for installation."
-  sudo -v || { echo "Error: failed to obtain sudo privileges." >&2; exit 1; }
+  printf "  ${COLOR_YELLOW}sudo privileges are required for installation.${COLOR_RESET}\n"
+  sudo -v || { _error "Failed to obtain sudo privileges."; exit 1; }
   _run() { sudo "$@"; }
 else
   _run() { "$@"; }
@@ -130,32 +157,32 @@ fi
 # ────────────────────────────────────────────
 # Main script installation
 # ────────────────────────────────────────────
-echo "Installing main script..."
+printf "  ${COLOR_BOLD}Installing main script...${COLOR_RESET}\n"
 _run rm -f "$BIN_DEST"
 _run cp "$SRC_DIR/claude-profile-manager" "$BIN_DEST"
 _run chmod 755 "$BIN_DEST"
-echo "  Installed: $BIN_DEST"
+_success "$BIN_DEST"
 
 # ────────────────────────────────────────────
 # Shell integration and statusline file installation
 # ────────────────────────────────────────────
-echo "Installing shell integration files..."
+printf "  ${COLOR_BOLD}Installing shell integration files...${COLOR_RESET}\n"
 _run mkdir -p "$SHARE_DEST"
 
 _run rm -f "$SHARE_DEST/claude-profile-manager.zsh"
 _run cp "$SRC_DIR/claude-profile-manager.zsh" "$SHARE_DEST/claude-profile-manager.zsh"
 _run chmod 644 "$SHARE_DEST/claude-profile-manager.zsh"
-echo "  Installed: $SHARE_DEST/claude-profile-manager.zsh"
+_success "claude-profile-manager.zsh"
 
 _run rm -f "$SHARE_DEST/claude-profile-manager.bash"
 _run cp "$SRC_DIR/claude-profile-manager.bash" "$SHARE_DEST/claude-profile-manager.bash"
 _run chmod 644 "$SHARE_DEST/claude-profile-manager.bash"
-echo "  Installed: $SHARE_DEST/claude-profile-manager.bash"
+_success "claude-profile-manager.bash"
 
 _run rm -f "$SHARE_DEST/statusline-command.sh"
 _run cp "$SRC_DIR/statusline-command.sh" "$SHARE_DEST/statusline-command.sh"
 _run chmod 755 "$SHARE_DEST/statusline-command.sh"
-echo "  Installed: $SHARE_DEST/statusline-command.sh"
+_success "statusline-command.sh"
 
 # ────────────────────────────────────────────
 # Linux/WSL: auto-add PATH
@@ -166,7 +193,7 @@ if [ "$NEED_SUDO" = false ]; then
     [ -f "$_rc" ] || continue
     if ! grep -qF '.local/bin' "$_rc" 2>/dev/null; then
       printf '\n# claude-profile-manager: local bin path\n%s\n' "$PATH_EXPORT" >> "$_rc"
-      echo "  PATH added: $_rc"
+      _success "PATH added: $_rc"
     fi
   done
   unset _rc
@@ -177,7 +204,7 @@ fi
 # Shell integration rc file registration
 # ────────────────────────────────────────────
 echo ""
-echo "Installation complete!"
+_success "Installation complete!"
 echo ""
 
 _detect_shell() {
@@ -190,21 +217,21 @@ _add_to_rc() {
   local source_line="$2"
 
   if grep -qF "$ZSHRC_BEGIN" "$rc_file" 2>/dev/null; then
-    echo "  $rc_file already has integration settings."
+    printf "  ${COLOR_DIM}%s already has integration settings.${COLOR_RESET}\n" "$rc_file"
     return
   fi
 
-  echo "────────────────────────────────────────────────────"
-  echo "  The following needs to be added to $rc_file:"
+  printf "  ${COLOR_DIM}──────────────────────────────────────────────────${COLOR_RESET}\n"
+  printf "  The following needs to be added to ${COLOR_BOLD}%s${COLOR_RESET}:\n" "$rc_file"
   echo ""
-  echo "    $ZSHRC_BEGIN"
-  echo "    $source_line"
-  echo "    $ZSHRC_END"
+  printf "    ${COLOR_DIM}%s${COLOR_RESET}\n" "$ZSHRC_BEGIN"
+  printf "    ${COLOR_CYAN}%s${COLOR_RESET}\n" "$source_line"
+  printf "    ${COLOR_DIM}%s${COLOR_RESET}\n" "$ZSHRC_END"
   echo ""
-  echo "────────────────────────────────────────────────────"
+  printf "  ${COLOR_DIM}──────────────────────────────────────────────────${COLOR_RESET}\n"
   echo ""
 
-  printf "Add automatically now? (y/N): "
+  printf "  Add automatically now? (y/N): "
   read -r auto_add
   auto_add="${auto_add%% *}"
   case "$auto_add" in
@@ -214,22 +241,22 @@ _add_to_rc() {
         printf '%s\n' "$source_line"
         printf '%s\n' "$ZSHRC_END"
       } >> "$rc_file"
-      echo "  Added to $rc_file!"
+      _success "Added to $rc_file!"
       ;;
     *)
-      echo "  Add manually to $rc_file then apply."
+      printf "  ${COLOR_DIM}Add manually to %s then apply.${COLOR_RESET}\n" "$rc_file"
       ;;
   esac
 }
 
 if [ -f "$HOME/.zshrc" ] || [ "$CURRENT_SHELL" = "zsh" ]; then
-  echo "[ zsh integration ]"
+  printf "  ${COLOR_BOLD}[ zsh integration ]${COLOR_RESET}\n"
   _add_to_rc "$HOME/.zshrc" "source $SHARE_DEST/claude-profile-manager.zsh"
   echo ""
 fi
 
 if [ "$PLATFORM" != "macos" ] || [ "$CURRENT_SHELL" = "bash" ]; then
-  echo "[ bash integration ]"
+  printf "  ${COLOR_BOLD}[ bash integration ]${COLOR_RESET}\n"
   BASHRC="$HOME/.bashrc"
   if [ "$PLATFORM" = "macos" ] && [ ! -f "$BASHRC" ]; then
     BASHRC="$HOME/.bash_profile"
@@ -238,8 +265,8 @@ if [ "$PLATFORM" != "macos" ] || [ "$CURRENT_SHELL" = "bash" ]; then
   echo ""
 fi
 
-echo "Next steps:"
-echo "  1. Reload shell:    source ~/.zshrc  or  source ~/.bashrc"
-echo "  2. Initial setup:   cpm setup"
-echo "  3. Switch account:  cpm <profile-name>"
+printf "  ${COLOR_BOLD}Next steps:${COLOR_RESET}\n"
+printf "    1. Reload shell:    ${COLOR_CYAN}source ~/.zshrc${COLOR_RESET}  or  ${COLOR_CYAN}source ~/.bashrc${COLOR_RESET}\n"
+printf "    2. Initial setup:   ${COLOR_CYAN}cpm setup${COLOR_RESET}\n"
+printf "    3. Switch account:  ${COLOR_CYAN}cpm <profile-name>${COLOR_RESET}\n"
 echo ""
