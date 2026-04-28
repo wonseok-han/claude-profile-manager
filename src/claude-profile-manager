@@ -62,7 +62,7 @@ _validate_profile_name() {
     exit 1
   fi
   case "$name" in
-    create|clone|refresh|rename|remove|status|list|doctor|setup|statusline|help)
+    create|clone|refresh|rename|remove|uninstall|status|list|doctor|setup|statusline|help)
       _error "'${name}' is a reserved word and cannot be used as a profile name."
       exit 1
       ;;
@@ -197,6 +197,128 @@ cmd_refresh() {
     _error "Failed to refresh. Token may have fully expired."
     printf "  ${COLOR_DIM}Try:${COLOR_RESET} ${COLOR_CYAN}cpm remove %s && cpm create %s${COLOR_RESET}\n" "$profile" "$profile"
   fi
+}
+
+cmd_uninstall() {
+  local platform
+  case "$(uname -s)" in
+    Darwin) platform="macos" ;;
+    Linux)
+      if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
+        platform="wsl"
+      else
+        platform="linux"
+      fi
+      ;;
+    *) platform="unknown" ;;
+  esac
+
+  local bin_path share_dir need_sudo=false
+  if [ "$platform" = "macos" ]; then
+    bin_path="/usr/local/bin/claude-profile-manager"
+    share_dir="/usr/local/share/claude-profile-manager"
+    need_sudo=true
+  else
+    bin_path="$HOME/.local/bin/claude-profile-manager"
+    share_dir="$HOME/.local/share/claude-profile-manager"
+  fi
+
+  _header "Uninstall claude-profile-manager"
+
+  printf "\n  The following will be removed:\n"
+  printf "    ${COLOR_CYAN}•${COLOR_RESET} %s\n" "$bin_path"
+  printf "    ${COLOR_CYAN}•${COLOR_RESET} %s/\n" "$share_dir"
+  printf "    ${COLOR_CYAN}•${COLOR_RESET} Shell integration blocks from rc files\n"
+
+  local profiles; profiles=$(_list_profiles)
+  if [ -n "$profiles" ]; then
+    printf "\n  ${COLOR_YELLOW}Profiles will NOT be removed${COLOR_RESET} (credentials stay intact):\n"
+    while IFS= read -r p; do
+      printf "    ${COLOR_DIM}•${COLOR_RESET} %s\n" "$(_profile_dir "$p")"
+    done <<< "$profiles"
+  fi
+
+  printf "\n  Continue? (y/N): "
+  read -r confirm
+  confirm="${confirm%% *}"
+  case "$confirm" in
+    [yY]|[yY][eE][sS]) ;;
+    *) echo "  Cancelled."; return ;;
+  esac
+
+  if pgrep -f 'claude' >/dev/null 2>&1; then
+    printf "\n  ${COLOR_RED}⚠ Active Claude session(s) detected.${COLOR_RESET}\n"
+    printf "  ${COLOR_YELLOW}Removing profile directories may disrupt running sessions.${COLOR_RESET}\n"
+    printf "  ${COLOR_RED}Continue anyway?${COLOR_RESET} (yes to confirm): "
+    read -r session_confirm
+    if [ "$session_confirm" != "yes" ]; then
+      echo "  Cancelled."
+      return
+    fi
+  fi
+
+  if [ "$need_sudo" = true ]; then
+    printf "\n  ${COLOR_YELLOW}sudo privileges are required.${COLOR_RESET}\n"
+    sudo -v || { _error "Failed to obtain sudo privileges."; exit 1; }
+    _run() { sudo "$@"; }
+  else
+    _run() { "$@"; }
+  fi
+
+  # Remove shell integration blocks from rc files
+  local begin_marker="# BEGIN claude-profile-manager"
+  local end_marker="# END claude-profile-manager"
+  for rc_file in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    [ -f "$rc_file" ] || continue
+    if grep -qF "$begin_marker" "$rc_file" 2>/dev/null; then
+      local tmp; tmp=$(mktemp)
+      awk -v b="$begin_marker" -v e="$end_marker" '
+        $0 == b { skip=1; next }
+        $0 == e { skip=0; next }
+        !skip { print }
+      ' "$rc_file" > "$tmp"
+      # Remove trailing blank lines left by block removal
+      sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp" > "${tmp}.clean" 2>/dev/null && mv "${tmp}.clean" "$tmp"
+      mv "$tmp" "$rc_file"
+      _success "Cleaned $rc_file"
+    fi
+  done
+
+  # Remove share directory
+  if [ -d "$share_dir" ]; then
+    _run rm -rf "$share_dir"
+    _success "Removed $share_dir"
+  fi
+
+  # Remove binary (self-delete — do this last)
+  if [ -f "$bin_path" ]; then
+    _run rm -f "$bin_path"
+    _success "Removed $bin_path"
+  fi
+
+  # Offer to remove profiles
+  if [ -n "$profiles" ]; then
+    printf "\n  Also remove all profile directories? (y/N): "
+    read -r remove_profiles
+    remove_profiles="${remove_profiles%% *}"
+    case "$remove_profiles" in
+      [yY]|[yY][eE][sS])
+        while IFS= read -r p; do
+          [ -z "$p" ] && continue
+          local pdir; pdir="$(_profile_dir "$p")"
+          rm -rf "$pdir"
+          _success "Removed $pdir"
+        done <<< "$profiles"
+        ;;
+      *)
+        printf "  ${COLOR_DIM}Profile directories preserved.${COLOR_RESET}\n"
+        ;;
+    esac
+  fi
+
+  printf "\n"
+  _success "Uninstall complete."
+  printf "  ${COLOR_DIM}Reload your shell to finish: ${COLOR_CYAN}exec \$SHELL${COLOR_RESET}\n\n"
 }
 
 cmd_clone() {
@@ -503,6 +625,7 @@ cmd_help() {
   printf "  ${COLOR_CYAN}cpm setup${COLOR_RESET}                  Interactive initial setup wizard\n"
   printf "  ${COLOR_CYAN}cpm doctor${COLOR_RESET}                 Check environment and authentication status\n"
   printf "  ${COLOR_CYAN}cpm statusline${COLOR_RESET}             Configure Claude Code statusline\n"
+  printf "  ${COLOR_CYAN}cpm uninstall${COLOR_RESET}              Remove claude-profile-manager from system\n"
   printf "  ${COLOR_CYAN}cpm help${COLOR_RESET}                   Print this help\n"
   echo ""
 
@@ -526,6 +649,7 @@ main() {
     create)    cmd_create "${2:-}" ;;
     clone)     cmd_clone "${2:-}" ;;
     refresh)   cmd_refresh "${2:-}" ;;
+    uninstall) cmd_uninstall ;;
     rename)    cmd_rename "${2:-}" "${3:-}" ;;
     remove)    cmd_remove "${2:-}" ;;
     status)    cmd_status ;;
@@ -536,7 +660,7 @@ main() {
     help|--help|-h|"") cmd_help ;;
     *)
       _error "Unknown command '${command}'."
-      printf "  ${COLOR_DIM}  Available: create, clone, refresh, rename, remove, status, setup, doctor, statusline, help${COLOR_RESET}\n" >&2
+      printf "  ${COLOR_DIM}  Available: create, clone, refresh, rename, remove, uninstall, status, setup, doctor, statusline, help${COLOR_RESET}\n" >&2
       exit 1
       ;;
   esac

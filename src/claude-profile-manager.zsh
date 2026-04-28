@@ -18,7 +18,7 @@ _claude_profile_manager_fn() {
         command claude
       fi
       ;;
-    status|list|create|clone|refresh|remove|rename|doctor|setup|statusline|help|--help|-h)
+    status|list|create|clone|refresh|remove|rename|uninstall|doctor|setup|statusline|help|--help|-h)
       command claude-profile-manager "$@"
       ;;
     *)
@@ -68,6 +68,7 @@ _claude_profile_manager_completions() {
         'setup:Interactive initial setup wizard'
         'doctor:Check environment info'
         'statusline:Configure Claude Code statusline'
+        'uninstall:Remove claude-profile-manager from system'
         'help:Print help'
       )
 
